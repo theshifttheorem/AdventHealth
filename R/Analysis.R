@@ -75,7 +75,7 @@ questionnaire_col_types <- cols(
   Adult_Custom_ID   = col_character(),
   Questionnaire_ID  = col_character(),
   Checklist_Date    = col_date(),
-  ExitQuestionnaire = col_integer(),
+  ExitQuestionnaire = col_logical(),
   Q01               = col_integer(),
   Q02               = col_integer(),
   Q03               = col_integer(),
@@ -265,10 +265,24 @@ adult_paired <- adult_combined %>%
 
 # save single combined wide file
 write_csv(adult_paired, "data/Adult_Paired.csv")
+adult_paired <- adult_paired %>%
+  mutate(Subgroup_115 = as.logical(Subgroup_115))
 
 # confirm final file
 cat("\nFinal combined file rows:    ", nrow(adult_paired),                    "\n")
 cat("Final combined file columns: ", ncol(adult_paired),                    "\n")
 cat("Adults in Subgroup 115:      ", sum(adult_paired$Subgroup_115 == 1),   "\n")
 cat("Adults NOT in Subgroup 115:  ", sum(adult_paired$Subgroup_115 == 0),   "\n")
+
+# print columns & classes
+col_classes <- sapply(adult_paired, class)   # one‑element vector per column
+
+cols_tbl <- tibble(
+  column = names(col_classes),
+  class  = unlist(col_classes)
+)
+
+write_csv(cols_tbl, "data/Adult_Paired_column_info.csv")
+
+# glimpse(adult_paired)
 
