@@ -5,6 +5,8 @@ library(dplyr)
 library(rstatix)
 library(tidyr)
 library(purrr)
+library(emmeans)
+
 
 # load data
 adult_paired <- read_csv("data/Adult_Paired.csv")
@@ -19,7 +21,7 @@ q_exit <- paste0("Q", sprintf("%02d", 1:30), "_exit")
 # max_vals <- c( 7,  6,  5,  5,  7,  7,  7,  7,  7,  7, 7,  7,  7,  6,  6,  6,  6,  6,  6,  6, 6,  6,  6,  6,  6,  6,  6,  4,  4,  3)
 
 # Only take Adult_ID, entry and exit questions
-data_q <- adult_paired %>% select(Adult_ID, all_of(c(q_entry, q_exit)))
+data_q <- adult_paired %>% select(Adult_ID, Subgroup_115, all_of(c(q_entry, q_exit)))
 
 # Reverse code Q11 (sodas), Q17(thaw food)
 data_q <- data_q %>%
@@ -35,73 +37,6 @@ data_q <- data_q %>%
 #cat("Clean file columns: ", ncol(adult_clean),                    "\n")
 #cat("Adults in Subgroup 115:      ", sum(adult_clean$Subgroup_115 == 1),   "\n")
 #cat("Adults NOT in Subgroup 115:  ", sum(adult_clean$Subgroup_115 == 0),   "\n")
-
-# Long format
-long_tbl <- data_q %>%
-  pivot_longer(
-    cols   = -Adult_ID,                    # everything except the ID
-    names_to = c("question", "visit"),
-    names_pattern = "(Q\\d{2})_(entry|exit)",
-    values_to = "response"
-  )
-
-
-# Wide format, back to entry/exit columns
-diff_tbl <- long_tbl %>%
-  pivot_wider(
-    names_from = visit,
-    values_from = response
-  ) %>%
-  mutate(diff = exit - entry) 
-
-summary(diff_tbl$diff)
-
-# Remove any pair that has a missing entry or exit
-diff_tbl_clean <- diff_tbl %>%
-  filter(!is.na(entry) & !is.na(exit))
-
-# How many rows (pairs) did we drop?
-n_removed  <- nrow(diff_tbl) - nrow(diff_tbl_clean)
-cat(sprintf("\n✅  Removed %d rows (paired observations) that had NA in either entry or exit.\n", n_removed))
-
-summary(diff_tbl_clean$diff)
-
-ggplot(diff_tbl_clean, aes(x = diff)) +
-  geom_histogram(bins = 20, fill = "#1f77b4", colour = "white") +
-  labs(title = "Distribution of Exit – Entry differences (cleaned)",
-       x = "Exit – Entry", y = "Count")
-
-# How many items improved, on average?
-improv_tbl <- diff_tbl_clean %>%
-  mutate(improved = diff > 0) %>%
-  group_by(Adult_ID) %>%
-  summarise(improved_cnt = sum(improved, na.rm = TRUE))
-
-improv_tbl %>%
-  summarise(mean_imp  = mean(improved_cnt, na.rm = TRUE),
-            median_imp = median(improved_cnt, na.rm = TRUE),
-            sd_imp     = sd(improved_cnt, na.rm = TRUE))
-
-ggplot(improv_tbl, aes(x = improved_cnt)) +
-  geom_histogram(bins = 20, fill = "#1f77b4", colour = "white") +
-  labs(title = "Distribution of #‑of‑Improved Items",
-       x = "Items improved (out of 30)",
-       y = "Count") +
-  theme_minimal()
-
-# wilcox test on each question
-wilcoxon_res <- diff_tbl_clean %>%
-  group_by(question) %>%
-  summarise(
-    n          = n(),
-    w_test     = list(wilcox.test(exit, entry, paired = TRUE, exact = FALSE)),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    stat   = map_dbl(w_test, ~.$statistic),
-    p_val  = map_dbl(w_test, ~.$p.value)
-  ) %>%
-  select(question, n, stat, p_val)
 
 # domain scores for diet quality, food resource management, physical activity, food safety, food security
 
@@ -122,47 +57,48 @@ paired_domain_score <- function(df, qs){
   )
 }
 
-diet_questions <- c(
-  "Q01","Q02","Q03","Q04","Q05",
-  "Q06","Q07","Q08","Q09","Q11_rc"
-)
+all_questions <- c("Q01","Q02","Q03","Q04","Q05",
+  "Q06","Q07","Q08","Q09","Q10", "Q11_rc",
+  "Q12","Q13","Q14", "Q15","Q16","Q17_rc","Q18",
+  "Q19","Q20","Q21","Q22",
+  "Q23","Q24","Q25","Q26","Q27",
+  "Q28","Q29","Q30")
+
+all <- paired_domain_score(data_q, all_questions)
+
+data_q$All_entry <- all$entry
+data_q$All_exit  <- all$exit
+
+diet_questions <- c("Q01","Q02","Q03","Q04","Q05",
+  "Q06","Q07","Q08","Q09","Q10", "Q11_rc")
 
 diet <- paired_domain_score(data_q, diet_questions)
 
 data_q$Diet_entry <- diet$entry
 data_q$Diet_exit  <- diet$exit
 
-frm_questions <- c(
-  "Q10","Q19","Q20","Q21","Q22",
-  "Q23","Q24","Q25","Q26","Q27"
-)
+frm_questions <- c("Q19","Q20","Q21","Q22","Q23","Q24","Q25","Q26","Q27")
 
 frm2 <- paired_domain_score(data_q, frm_questions)
 
 data_q$FRM_entry <- frm2$entry
 data_q$FRM_exit  <- frm2$exit
 
-pa_questions <- c(
-  "Q12","Q13","Q14"
-)
+pa_questions <- c("Q12","Q13","Q14")
 
 pa <- paired_domain_score(data_q, pa_questions)
 
 data_q$PA_entry <- pa$entry
 data_q$PA_exit  <- pa$exit
 
-fs_questions <- c(
-  "Q15","Q16","Q17_rc","Q18"
-)
+fs_questions <- c("Q15","Q16","Q17_rc","Q18")
 
 fs <- paired_domain_score(data_q, fs_questions)
 
 data_q$FSafety_entry <- fs$entry
 data_q$FSafety_exit  <- fs$exit
 
-fsec_questions <- c(
-  "Q28","Q29","Q30"
-)
+fsec_questions <- c("Q28","Q29","Q30")
 
 fsec <- paired_domain_score(data_q, fsec_questions)
 
@@ -170,6 +106,10 @@ data_q$FSecurity_entry <- fsec$entry
 data_q$FSecurity_exit  <- fsec$exit
 
 # wilcox test for each domain
+
+wilcox.test(data_q$All_exit,
+            data_q$All_entry,
+            paired = TRUE)
 
 wilcox.test(data_q$Diet_exit,
             data_q$Diet_entry,
@@ -192,10 +132,9 @@ wilcox.test(data_q$FSecurity_exit,
             paired = TRUE)
 
 # summary table
-domains <- c("Diet", "FRM", "PA",
-             "FSafety", "FSecurity")
+domains <- c("All", "Diet", "FRM", "PA", "FSafety", "FSecurity")
 
-results <- map_df(domains, function(x){
+overall_results <- map_df(domains, function(x){
 
   test <- wilcox.test(
     data_q[[paste0(x,"_exit")]],
@@ -213,7 +152,7 @@ results <- map_df(domains, function(x){
   )
 })
 
-results %>%
+overall_results %>%
   mutate(
     P_Value = format.pval(
       P_Value,
@@ -256,7 +195,7 @@ get_wilcox_effect <- function(entry, exit){
 }
 
 
-effect_results <- map_df(domains, function(x){
+overall_effect_results <- map_df(domains, function(x){
 
   eff <- get_wilcox_effect(
     data_q[[paste0(x, "_entry")]],
@@ -270,12 +209,12 @@ effect_results <- map_df(domains, function(x){
   )
 })
 
-effect_results
+overall_effect_results
 
-# final results
+# overall results
 
-final_results <- results %>%
-  left_join(effect_results, by = "Domain") %>%
+overallresults <- overall_results %>%
+  left_join(overall_effect_results, by = "Domain") %>%
   mutate(
     Effect_Size_Interpretation = case_when(
       Effect_Size_r < 0.10 ~ "Negligible",
@@ -299,4 +238,103 @@ final_results <- results %>%
     Effect_Size_Interpretation
   )
 
-final_results
+overallresults
+
+# Subgroup_115
+
+within_group_results <- map_df(domains, function(d){
+
+  g0 <- wilcox.test(
+    subset(data_q, Subgroup_115 == 0)[[paste0(d, "_exit")]],
+    subset(data_q, Subgroup_115 == 0)[[paste0(d, "_entry")]],
+    paired = TRUE
+  )
+
+  g1 <- wilcox.test(
+    subset(data_q, Subgroup_115 == 1)[[paste0(d, "_exit")]],
+    subset(data_q, Subgroup_115 == 1)[[paste0(d, "_entry")]],
+    paired = TRUE
+  )
+
+  tibble(
+    Domain = d,
+    Group0_P = g0$p.value,
+    Group1_P = g1$p.value
+  )
+
+})
+
+within_group_results
+
+# change in domains
+
+data_q <- data_q %>%
+  mutate(
+    All_change = All_exit - All_entry,
+    Diet_change = Diet_exit - Diet_entry,
+    FRM_change = FRM_exit - FRM_entry,
+    PA_change = PA_exit - PA_entry,
+    FSafety_change = FSafety_exit - FSafety_entry,
+    FSecurity_change = FSecurity_exit - FSecurity_entry
+  )
+
+# ANCOVA model 
+
+ancova_results <- purrr::map_df(domains, function(d){
+
+  model <- lm(
+    as.formula(
+      paste0(d, "_entry ~ ", d, "_exit + Subgroup_115")
+    ),
+    data = data_q
+  )
+
+  coef_row <- summary(model)$coefficients["Subgroup_115", ]
+
+  tibble(
+    Domain = d,
+    Estimate = coef_row["Estimate"],
+    P_Value = coef_row["Pr(>|t|)"]
+  )
+})
+
+ancova_results
+summary(ancova_results)
+
+model1 <- lm(All_exit ~ All_entry + Subgroup_115, data = data_q)
+model1
+summary(model1)
+
+summary(lm(All_exit ~ Subgroup_115, data = data_q))
+summary(lm(All_change ~ Subgroup_115, data = data_q))
+t.test(All_exit ~ Subgroup_115, data = data_q)
+t.test(All_change ~ Subgroup_115, data = data_q)
+
+model1 <- lm(All_exit ~ All_entry + Subgroup_115, data = data_q)
+emmeans(model1, "Subgroup_115")
+
+# wilcox groups comparison
+
+subgroup_comparison <- map_df(domains, function(d){
+  change_var <- paste0(d,"_change")
+  test <- wilcox.test(
+    as.formula(
+      paste(change_var,"~ Subgroup_115")
+    ),
+    data = data_q
+  )
+  tibble(
+    Domain = d,
+    Group0_Median_Improvement =
+      median(data_q[[change_var]][data_q$Subgroup_115==0],
+             na.rm=TRUE),
+    Group1_Median_Improvement =
+      median(data_q[[change_var]][data_q$Subgroup_115==1],
+             na.rm=TRUE),
+    P_Value = test$p.value
+  )
+})
+subgroup_comparison
+
+
+
