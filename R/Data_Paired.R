@@ -285,4 +285,3 @@ cols_tbl <- tibble(
 write_csv(cols_tbl, "data/Adult_Paired_column_info.csv")
 
 # glimpse(adult_paired)
-
