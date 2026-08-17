@@ -2,6 +2,9 @@
 
 library(tidyverse)
 library(purrr)
+library(lme4)
+library(lmerTest)
+library(broom.mixed)
 
 # Load data
 adult_paired <- read_csv("data/Adult_Paired.csv")
@@ -227,26 +230,92 @@ write_csv(within_group_results,   "Reports/within_group_results.csv")
 write_csv(domain_between_results, "Reports/domain_between_results.csv")
 write_csv(per_question_results,   "Reports/per_question_results.csv")
 
-# WRITE ALL RESULTS INTO ONE CSV
+# Linear Mixed effects model
 
-all_results_combined <- bind_rows(
-  overall_results %>%
-    mutate(Section = "1. Overall (All Participants)") %>%
-    select(Section, everything()),
+#    Model: Score ~ Time * Subgroup + (1 | Adult_ID)
+#    Key term: Time:Subgroup interaction — tests whether change over time
+#    differs between intervention (Group 1) and control (Group 0)
+#    Fit separately per domain, then per question
 
-  within_group_results %>%
-    mutate(Section = "2. Within-Group (Entry vs Exit per Subgroup)") %>%
-    select(Section, everything()),
+# Per Domain 
 
-  domain_between_results %>%
-    mutate(Section = "3. Between-Group per Domain") %>%
-    select(Section, everything()),
+lmm_domain_results <- map_df(domains, function(d) {
 
-  per_question_results %>%
-    mutate(Section = "4. Between-Group per Question") %>%
-    select(Section, everything())
-)
+  data_long <- data_q %>%
+    select(Adult_ID, Subgroup_115,
+           entry = all_of(paste0(d, "_entry")),
+           exit  = all_of(paste0(d, "_exit"))) %>%
+    pivot_longer(
+      cols      = c(entry, exit),
+      names_to  = "Time",
+      values_to = "Score"
+    ) %>%
+    mutate(
+      Time     = ifelse(Time == "entry", 0, 1),
+      Subgroup = factor(Subgroup_115, levels = c(0, 1))
+    ) %>%
+    filter(!is.na(Score))
 
-write_csv(all_results_combined, "Reports/all_results.csv")
+  model <- lmer(Score ~ Time * Subgroup + (1 | Adult_ID),
+                data = data_long, REML = TRUE)
 
-cat("Written: Reports/all_results.csv\n")
+  tidy(model, effects = "fixed", conf.int = TRUE) %>%
+    mutate(Domain = d)
+}) %>%
+  mutate(
+    Term_Label = recode(term,
+      "(Intercept)"    = "Intercept (Group 0, Entry)",
+      "Time"           = "Time Effect (Group 0)",
+      "Subgroup1"      = "Group 1 vs Group 0 (at Entry)",
+      "Time:Subgroup1" = "Time x Subgroup (Interaction)"
+    ),
+    Reject_H0 = p.value < 0.05
+  ) %>%
+  select(Domain, Term_Label, estimate, std.error, statistic, df, p.value,
+         conf.low, conf.high, Reject_H0)
+
+lmm_domain_results
+
+# Per Question
+
+lmm_question_results <- map_df(all_questions, function(q) {
+
+  data_long <- data_q %>%
+    select(Adult_ID, Subgroup_115,
+           entry = all_of(paste0(q, "_entry")),
+           exit  = all_of(paste0(q, "_exit"))) %>%
+    pivot_longer(
+      cols      = c(entry, exit),
+      names_to  = "Time",
+      values_to = "Score"
+    ) %>%
+    mutate(
+      Time     = ifelse(Time == "entry", 0, 1),
+      Subgroup = factor(Subgroup_115, levels = c(0, 1))
+    ) %>%
+    filter(!is.na(Score))
+
+  model <- lmer(Score ~ Time * Subgroup + (1 | Adult_ID),
+                data = data_long, REML = TRUE)
+
+  tidy(model, effects = "fixed", conf.int = TRUE) %>%
+    mutate(Question = q)
+}) %>%
+  mutate(
+    Term_Label = recode(term,
+      "(Intercept)"    = "Intercept (Group 0, Entry)",
+      "Time"           = "Time Effect (Group 0)",
+      "Subgroup1"      = "Group 1 vs Group 0 (at Entry)",
+      "Time:Subgroup1" = "Time x Subgroup (Interaction)"
+    ),
+    Reject_H0 = p.value < 0.05
+  ) %>%
+  select(Question, Term_Label, estimate, std.error, statistic, df, p.value,
+         conf.low, conf.high, Reject_H0)
+
+lmm_question_results
+
+# WRITE OUTPUTS FOR LINEAR FIXED EFFECTS MODEL
+
+write_csv(lmm_domain_results,     "Reports/lmm_domain_results.csv")
+write_csv(lmm_question_results,   "Reports/lmm_question_results.csv")
