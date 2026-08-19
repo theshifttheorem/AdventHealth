@@ -5,6 +5,9 @@ library(purrr)
 library(lme4)
 library(lmerTest)
 library(broom.mixed)
+library(ggplot2)
+library(car)   
+library(DescTools)    
 
 # Load data
 adult_paired <- read_csv("data/Adult_Paired.csv")
@@ -225,10 +228,90 @@ per_question_results
 
 # WRITE OUTPUTS
 
-write_csv(overall_results,        "Reports/overall_results.csv")
-write_csv(within_group_results,   "Reports/within_group_results.csv")
-write_csv(domain_between_results, "Reports/domain_between_results.csv")
-write_csv(per_question_results,   "Reports/per_question_results.csv")
+#write_csv(overall_results,        "Reports/overall_results.csv")
+#write_csv(within_group_results,   "Reports/within_group_results.csv")
+#write_csv(domain_between_results, "Reports/domain_between_results.csv")
+#write_csv(per_question_results,   "Reports/per_question_results.csv")
+
+#plot q-q
+for (d in domains) {
+  chg <- data_q[[paste0(d, "_change")]][!is.na(data_q[[paste0(d, "_change")]])]
+  p  <- ggplot(data.frame(chg), aes(x = chg)) +
+        geom_histogram(binwidth = diff(range(chg))/30,
+                       fill      = "steelblue",
+                       color     = "white") +
+        geom_density(fill = "orange", alpha = 0.4) +
+        labs(title   = paste("Histogram & density –", d),
+             x       = "Change",
+             y       = "Density") +
+        theme_minimal()
+  print(p)
+}
+
+# Check Normality
+
+cat("\n\nAll:      Shapiro p =", shapiro.test(data_q$All_change)$p.value, 
+    " | Skew =", skewness(data_q$All_change, na.rm = TRUE), "\n")
+cat("Diet:      Shapiro p =", shapiro.test(data_q$Diet_change)$p.value, 
+    " | Skew =", skewness(data_q$All_change, na.rm = TRUE), "\n")
+cat("FRM:      Shapiro p =", shapiro.test(data_q$FRM_change)$p.value, 
+    " | Skew =", skewness(data_q$All_change, na.rm = TRUE), "\n")
+cat("PA:       Shapiro p =", shapiro.test(data_q$PA_change)$p.value,
+    " | Skew =", skewness(data_q$PA_change, na.rm = TRUE), "\n")
+cat("FSafety:  Shapiro p =", shapiro.test(data_q$FSafety_change)$p.value,
+    " | Skew =", skewness(data_q$FSafety_change, na.rm = TRUE), "\n")
+cat("FSecurity: Shapiro p =", shapiro.test(data_q$FSecurity_change)$p.value,
+    " | Skew =", skewness(data_q$FSecurity_change, na.rm = TRUE), "\n\n")
+
+# Visual check
+par(mfrow = c(3, 3))
+hist(data_q$All_change, main = "All")
+hist(data_q$Diet_change, main = "Diet")
+hist(data_q$FRM_change, main = "FRM")
+hist(data_q$PA_change, main = "PA")
+hist(data_q$FSafety_change, main = "FSafety")
+hist(data_q$FSecurity_change, main = "FSecurity")
+par(mfrow = c(1, 1))
+
+
+# Non-normal domains: All, PA, FSafety, FSecurity
+
+# For RIGHT-SKEWED data (positive skew): use LOG or SQRT
+# For LEFT-SKEWED data (negative skew): use SQUARE or RECIPROCAL
+
+# Add transformed variables to your data
+data_q <- data_q %>%
+  mutate(
+    # Shift to positive if needed (add minimum + 0.1)
+    All_shift = All_change + abs(min(All_change, na.rm = TRUE)) + 0.1,
+    PA_shift = PA_change + abs(min(PA_change, na.rm = TRUE)) + 0.1,
+    FSafety_shift = FSafety_change + abs(min(FSafety_change, na.rm = TRUE)) + 0.1,
+    
+    # Apply transformations
+    All_trans = log(All_shift),
+    PA_trans = log(PA_shift),
+    FSafety_trans = log(FSafety_shift),
+    FSecurity_trans = FSecurity_change^2
+  )
+
+# After transformation
+cat("AFTER TRANSFORMATION:\n")
+cat("All:      Shapiro p =", shapiro.test(data_q$All_trans)$p.value,
+    " | Skew =", skewness(data_q$All_trans, na.rm = TRUE), "\n")
+cat("PA:       Shapiro p =", shapiro.test(data_q$PA_trans)$p.value,
+    " | Skew =", skewness(data_q$PA_trans, na.rm = TRUE), "\n")
+cat("FSafety:  Shapiro p =", shapiro.test(data_q$FSafety_trans)$p.value,
+    " | Skew =", skewness(data_q$FSafety_trans, na.rm = TRUE), "\n")
+cat("FSecurity: Shapiro p =", shapiro.test(data_q$FSecurity_trans)$p.value,
+    " | Skew =", skewness(data_q$FSecurity_trans, na.rm = TRUE), "\n")
+
+# After transformation visual check
+par(mfrow = c(2, 2))
+hist(data_q$All_trans, main = "All (log)")
+hist(data_q$PA_trans, main = "PA (log)")
+hist(data_q$FSafety_trans, main = "FSafety (log)")
+hist(data_q$FSecurity_trans, main = "FSecurity (square)")
+par(mfrow = c(1, 1))
 
 # Linear Mixed effects model
 
@@ -317,5 +400,5 @@ lmm_question_results
 
 # WRITE OUTPUTS FOR LINEAR FIXED EFFECTS MODEL
 
-write_csv(lmm_domain_results,     "Reports/lmm_domain_results.csv")
-write_csv(lmm_question_results,   "Reports/lmm_question_results.csv")
+#write_csv(lmm_domain_results,     "Reports/lmm_domain_results.csv")
+#write_csv(lmm_question_results,   "Reports/lmm_question_results.csv")
