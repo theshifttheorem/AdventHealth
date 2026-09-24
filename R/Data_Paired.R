@@ -268,14 +268,26 @@ write_csv(adult_paired, "data/Adult_Paired.csv")
 adult_paired <- adult_paired %>%
   mutate(Subgroup_115 = as.logical(Subgroup_115))
 
+
+
+adult_paired_clean <- adult_paired %>%
+  # drop Children_Ages
+  select(-Children_Ages) %>%
+  # strip spaces, commas, punctuation from all character columns
+  mutate(across(where(is.character), ~ gsub("[[:space:][:punct:]]", "", .))) %>%
+  # convert Subgroup_115 from logical (TRUE/FALSE) to 0/1
+  mutate(Subgroup_115 = as.integer(Subgroup_115))
+
+write_csv(adult_paired_clean, "data/Adult_Paired_clean.csv")
+
 # confirm final file
-cat("\nFinal combined file rows:    ", nrow(adult_paired),                    "\n")
-cat("Final combined file columns: ", ncol(adult_paired),                    "\n")
-cat("Adults in Subgroup 115:      ", sum(adult_paired$Subgroup_115 == 1),   "\n")
-cat("Adults NOT in Subgroup 115:  ", sum(adult_paired$Subgroup_115 == 0),   "\n")
+cat("\nFinal combined file rows:    ", nrow(adult_paired_clean),                    "\n")
+cat("Final combined file columns: ", ncol(adult_paired_clean),                    "\n")
+cat("Adults in Subgroup 115:      ", sum(adult_paired_clean$Subgroup_115 == 1),   "\n")
+cat("Adults NOT in Subgroup 115:  ", sum(adult_paired_clean$Subgroup_115 == 0),   "\n")
 
 # print columns & classes
-col_classes <- sapply(adult_paired, class)   # one‑element vector per column
+col_classes <- sapply(adult_paired_clean, class)   # one‑element vector per column
 
 cols_tbl <- tibble(
   column = names(col_classes),

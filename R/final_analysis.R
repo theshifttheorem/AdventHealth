@@ -7,7 +7,9 @@ library(lmerTest)
 library(broom.mixed)
 library(ggplot2)
 library(car)   
-library(DescTools)    
+library(DescTools)  
+library(dplyr)
+library(stringr)
 
 # Load data
 adult_paired <- read_csv("data/Adult_Paired.csv")
@@ -42,6 +44,116 @@ fs_questions   <- c("Q15","Q16","Q17_rc","Q18")
 fsec_questions <- c("Q28","Q29","Q30")
 
 domains <- c("All", "Diet", "FRM", "PA", "FSafety", "FSecurity")
+
+
+# Compute domain‑level means for each participant
+
+domain_means <- data_q %>% 
+  rowwise() %>%                           
+  mutate(
+
+    ## All
+    All_entry_mean = mean(
+      c_across(all_of(paste0(all_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(all_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    All_exit_mean  = mean(
+      c_across(all_of(paste0(all_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(all_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    ),
+
+    ## Diet 
+    Diet_entry_mean = mean(
+      c_across(all_of(paste0(diet_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(diet_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    Diet_exit_mean  = mean(
+      c_across(all_of(paste0(diet_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(diet_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    ),
+
+    ## FRM
+    FRM_entry_mean = mean(
+      c_across(all_of(paste0(frm_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(frm_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    FRM_exit_mean  = mean(
+      c_across(all_of(paste0(frm_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(frm_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    ),
+
+    ## PA 
+    PA_entry_mean = mean(
+      c_across(all_of(paste0(pa_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(pa_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    PA_exit_mean  = mean(
+      c_across(all_of(paste0(pa_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(pa_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    ),
+
+    ## FSafety
+    FSafety_entry_mean = mean(
+      c_across(all_of(paste0(fs_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(fs_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    FSafety_exit_mean  = mean(
+      c_across(all_of(paste0(fs_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(fs_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    ),
+
+    ## FSecurity
+    FSecurity_entry_mean = mean(
+      c_across(all_of(paste0(fsec_questions, "_entry")))[
+        !is.na(c_across(all_of(paste0(fsec_questions, "_exit"))))
+      ],
+      na.rm = TRUE
+    ),
+    FSecurity_exit_mean  = mean(
+      c_across(all_of(paste0(fsec_questions, "_exit")))[
+        !is.na(c_across(all_of(paste0(fsec_questions, "_entry"))))
+      ],
+      na.rm = TRUE
+    )
+  ) %>% 
+  ungroup()
+
+# Arrange the final CSV
+
+final_table <- domain_means %>% 
+  select(
+    Adult_ID,
+    Subgroup_115,
+
+    All_entry_mean,  All_exit_mean,
+    Diet_entry_mean, Diet_exit_mean,
+    FRM_entry_mean,  FRM_exit_mean,
+    PA_entry_mean,   PA_exit_mean,
+    FSafety_entry_mean, FSafety_exit_mean,
+    FSecurity_entry_mean, FSecurity_exit_mean
+  )
+
+write_csv(final_table, "data/adult_domain_means.csv")
 
 # Helper: compute paired domain scores (entry & exit row means)
 paired_domain_score <- function(df, qs) {
