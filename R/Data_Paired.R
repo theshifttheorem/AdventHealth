@@ -13,7 +13,7 @@ adult_col_types <- cols(
   Staff_ID                           = col_character(),
   Staff_Name                         = col_character(),
   City                               = col_character(),
-  Enrollment_Date                    = col_date(),
+  Enrollment_Date                    = col_date(format = "%m/%d/%Y"),
   State                              = col_character(),
   Zip                                = col_character(),
   Age                                = col_integer(),
@@ -41,7 +41,7 @@ adult_col_types <- cols(
   ID_Additional_Questionnaire_Exit   = col_character(),
   Additional_Set_ID                  = col_character(),
   Status                             = col_integer(),
-  Exit_Date                          = col_date(),
+  Exit_Date                          = col_date(format = "%m/%d/%Y"),
   nLessons                           = col_integer(),
   nSessions                          = col_integer(),
   nHours                             = col_double(),
@@ -51,8 +51,8 @@ adult_col_types <- cols(
   County_FIPS                        = col_character(),
   Congressional_District             = col_character(),
   CBSA                               = col_character(),
-  LastMod                            = col_date(),
-  Date_Created                       = col_date(),
+  LastMod                            = col_date(format = "%m/%d/%Y"),
+  Date_Created                       = col_date(format = "%m/%d/%Y"),
   Creator_ID                         = col_character(),
   Low_Recruit                        = col_integer(),
   Med_Edu_Minutes                    = col_integer(),
@@ -119,16 +119,34 @@ subgroup_col_types <- cols(
   Subgroup_Type   = col_character()
 )
 
+pubasst_col_types <- cols(
+  Region_ID      = col_integer(),
+  Region_Name    = col_character(),
+  Adult_ID       = col_character(),
+  Adult_Custom_ID = col_character(),
+  PubAsstID      = col_integer(),
+  PubAsstProg    = col_character(),
+  FoodAsst       = col_integer(),
+  PubAsstLevel   = col_character(),
+  PubAsstType    = col_character()
+)
+
 # load fy25 files
 adult_fy25     <- read_csv("data/Adult FY25.csv", col_types = adult_col_types)
 adult_q_fy25   <- read_csv("data/Adult Questionnaire FY25.csv", col_types = questionnaire_col_types)
 subgroups_fy25 <- read_csv("data/AdultSubgroups FY25.csv", col_types = subgroup_col_types)
+pubasst_fy25 <- read_csv("data/AdultPublicAssistance FY25.csv", col_types = pubasst_col_types)
 
 # load fy26 files
 adult_fy26     <- read_csv("data/Adult FY26.csv", col_types = adult_col_types)
 adult_q_fy26   <- read_csv("data/Adult Questionnaire FY26.csv", col_types = questionnaire_col_types)
 subgroups_fy26 <- read_csv("data/AdultSubgroups FY26.csv", col_types = subgroup_col_types)
+pubasst_fy26 <- read_csv("data/AdultPublicAssistance FY26.csv", col_types = pubasst_col_types)
 
+#problems(adult_fy25)
+#names(adult_fy26)[c(8,36,46,47)] 
+#[1] "Enrollment_Date" "Exit_Date" "LastMod" "Date_Created"  
+#  
 # print columns and types
 
 iwalk(
@@ -263,13 +281,70 @@ adult_paired <- adult_combined %>%
   inner_join(paired, by = "Adult_ID") %>%
   mutate(Subgroup_115 = ifelse(Adult_ID %in% subgroup_115_ids, 1, 0))
 
+# combine & cleanpubasst fy25 & fy26
+pubasst_clean <- bind_rows(pubasst_fy25, pubasst_fy26) %>%
+  select(Adult_ID, PubAsstProg) %>% 
+  mutate(
+    Adult_ID   = as.character(Adult_ID),
+    PubAsstProg = str_replace_all(
+      as.character(PubAsstProg),
+      "[^[:alnum:]]",
+      "_"
+    ),
+    PubAsstProg = str_replace_all(PubAsstProg, "_+", "_")
+  ) %>%
+  distinct(Adult_ID, PubAsstProg, .keep_all = TRUE)
+
+# pivot pubasst to wide columns
+pubasst_wide <- pubasst_clean %>%
+  mutate(val = 1L) %>%
+  pivot_wider(
+    names_from  = PubAsstProg,
+    values_from = val,
+    values_fill = list(val = 0L),
+    names_glue  = "has_{PubAsstProg}"
+  ) %>% 
+  # overall flag: any program present?
+  mutate(
+    has_pubasst = if_else(rowSums(select(., -Adult_ID)) > 0,
+                         1L, 0L)
+  )
+
+# merge pubasst into adult_paired
+adult_paired_pub <- adult_paired %>%
+  left_join(pubasst_wide, by = "Adult_ID") %>%
+  mutate(across(
+    .cols    = starts_with("has_") & !all_of("has_pubasst"),
+    .fns     = ~replace_na(., 0L)
+  )) %>%
+  mutate(has_pubasst = replace_na(has_pubasst, 0L))
+
+# new columns for children ages
+
+adult_paired <- adult_paired_pub %>%
+  # 1.  Parse the string into a numeric vector *for each row*
+  mutate(child_ages_vec = map(
+    str_split(Children_Ages, ","),
+    ~ suppressWarnings(as.numeric(trimws(.x))) %>% na.omit()
+  )) %>%
+  # 2.  Create the four bucket flags, each calculated row‑wise
+  rowwise() %>%
+  mutate(
+    child_0_5   = if_else(any(child_ages_vec <= 5),  1L, 0L),
+    child_6_10  = if_else(any(child_ages_vec >= 6 & child_ages_vec <= 10), 1L, 0L),
+    child_11_15 = if_else(any(child_ages_vec >= 11 & child_ages_vec <= 15), 1L, 0L),
+    child_16_19 = if_else(any(child_ages_vec >= 16 & child_ages_vec <= 19), 1L, 0L)
+  ) %>%
+  ungroup() %>%
+  # 3.  Clean up helper column
+  select(-child_ages_vec)
+
 # save single combined wide file
 write_csv(adult_paired, "data/Adult_Paired.csv")
 adult_paired <- adult_paired %>%
   mutate(Subgroup_115 = as.logical(Subgroup_115))
 
-
-
+# clean values and remove children_ages column
 adult_paired_clean <- adult_paired %>%
   # drop Children_Ages
   select(-Children_Ages) %>%
@@ -296,4 +371,4 @@ cols_tbl <- tibble(
 
 write_csv(cols_tbl, "data/Adult_Paired_column_info.csv")
 
-# glimpse(adult_paired)
+# glimpse(adult_paired_clean)
