@@ -144,10 +144,6 @@ subgroups_fy26 <- read_csv("data/AdultSubgroups FY26.csv", col_types = subgroup_
 pubasst_fy26 <- read_csv("data/AdultPublicAssistance FY26.csv", col_types = pubasst_col_types)
 
 #problems(adult_fy25)
-#names(adult_fy26)[c(8,36,46,47)] 
-#[1] "Enrollment_Date" "Exit_Date" "LastMod" "Date_Created"  
-#  
-# print columns and types
 
 iwalk(
   list(
@@ -178,11 +174,75 @@ subgroups_fy25_clean <- subgroups_fy25 %>% filter(!Adult_ID %in% fy26_ids)
 adult_combined     <- bind_rows(adult_fy25_clean, adult_fy26)
 adult_q_combined   <- bind_rows(adult_q_fy25_clean, adult_q_fy26)
 subgroups_combined <- bind_rows(subgroups_fy25_clean, subgroups_fy26)
+  
+# new columns for children ages
+adult_combined <- adult_combined %>%
+  mutate(child_ages_vec = map(
+    str_split(Children_Ages, ","),
+    ~ suppressWarnings(as.numeric(trimws(.x))) %>% na.omit()
+  )) %>%
+  rowwise() %>%
+  mutate(
+    child_0_5   = if_else(any(child_ages_vec <= 5),  1L, 0L),
+    child_6_10  = if_else(any(child_ages_vec >= 6 & child_ages_vec <= 10), 1L, 0L),
+    child_11_15 = if_else(any(child_ages_vec >= 11 & child_ages_vec <= 15), 1L, 0L),
+    child_16_19 = if_else(any(child_ages_vec >= 16 & child_ages_vec <= 19), 1L, 0L)
+  ) %>%
+  ungroup() %>%
+  select(-child_ages_vec)
 
-cat("\nCombined adult records:               ", nrow(adult_combined),     "\n")
-cat("Combined questionnaire records:       ", nrow(adult_q_combined),   "\n")
-cat("Combined subgroup records:            ", nrow(subgroups_combined),  "\n")
+# Add YAWC (Young Adult With Children) flag
+adult_combined <- adult_combined %>% 
+  mutate(YAWC = if_else(Age <= 34 & nChildren == 0, 1L, 0L))
 
+# change 0 to NA for Age & highestgrade
+adult_combined  <- adult_combined  %>% mutate(
+  Age          = na_if(Age, 0),
+  Highest_Grade = na_if(Highest_Grade, 0)
+)
+
+# change N/S to NA
+adult_combined <- adult_combined %>%
+  rename(Monthly_Household_Income = Household_Income) %>%
+  mutate(
+    Monthly_Household_Income = na_if(Monthly_Household_Income, "N/S")
+  )
+
+# clean values and remove column
+adult_combined <- adult_combined %>%
+  # drop unnecessary columns
+  select(-c(Adult_Custom_ID,Children_Ages,ID_Recall_Entry,ID_Recall_Exit,ID_Questionnaire_Entry,
+      ID_Questionnaire_Exit,ID_Additional_Questionnaire_Entry,ID_Additional_Questionnaire_Exit,
+      nSessions,nHours,County_Name,County_FIPS,Congressional_District,CBSA,Med_Edu_Minutes,
+      High_Edu_Minutes,secondary_staff
+    )) %>%
+  # strip spaces, commas, punctuation from all character columns
+  mutate(across(where(is.character), ~ gsub("[[:space:][:punct:]]", "", .))) %>%
+  # turn the cleaned household income into a numeric
+  mutate(Monthly_Household_Income = as.numeric(Monthly_Household_Income))
+
+# https://aspe.hhs.gov/sites/default/files/documents/b1bfa16b20ae9b89d525bc35de7c1643/detailed-guidelines-2026.pdf
+# add federal poverty level column
+fpl <- data.frame(
+  Total_Household = 1:14,
+  MonthlyFPL = c(
+    1330, 1803, 2277, 2750,
+    3223, 3697, 4170, 4643,
+    5117, 5590, 6063, 6537, 
+    7010, 7483
+  )
+)
+
+adult_combined <- adult_combined %>%
+  left_join(fpl, by = "Total_Household") %>%
+  mutate(
+    Monthly_Household_Income = Monthly_Household_Income
+  ) %>%
+  mutate(
+    FPL_Percent = Monthly_Household_Income / MonthlyFPL * 100,
+    fpl_185 = as.integer(FPL_Percent >= 185)
+  ) %>%
+  select(-MonthlyFPL)
 
 # status distribution
 adult_combined %>%
@@ -205,6 +265,10 @@ adult_combined %>%
   ) %>%
   select(Status, Reason, n, Pct)
 
+#cat("\nCombined adult records:               ", nrow(adult_combined),     "\n")
+#cat("Combined questionnaire records:       ", nrow(adult_q_combined),   "\n")
+#cat("Combined subgroup records:            ", nrow(subgroups_combined),  "\n")
+
 # questionnaire entry vs exit split
 adult_q_combined %>%
   count(ExitQuestionnaire) %>%
@@ -215,8 +279,8 @@ adult_q_combined %>%
   select(ExitQuestionnaire, Label, n, Pct)
 
 # unique adult counts
-cat("\nUnique Adults in adult_combined:    ", n_distinct(adult_combined$Adult_ID),   "\n")
-cat("Unique Adults in adult_q_combined:  ", n_distinct(adult_q_combined$Adult_ID), "\n")
+#cat("\nUnique Adults in adult_combined:    ", n_distinct(adult_combined$Adult_ID),   "\n")
+#cat("Unique Adults in adult_q_combined:  ", n_distinct(adult_q_combined$Adult_ID), "\n")
 
 # entry/exit pairing check
 paired_check <- adult_q_combined %>%
@@ -228,9 +292,9 @@ paired_check <- adult_q_combined %>%
     .groups  = "drop"
   )
 
-cat("\nAdults with both entry & exit:  ", sum(paired_check$has_both),                                    "\n")
-cat("Adults with entry only:         ", sum(paired_check$n_entry > 0 & paired_check$n_exit == 0),       "\n")
-cat("Adults with exit only:          ", sum(paired_check$n_entry == 0 & paired_check$n_exit > 0),       "\n")
+#cat("\nAdults with both entry & exit:  ", sum(paired_check$has_both),                                    "\n")
+#cat("Adults with entry only:         ", sum(paired_check$n_entry > 0 & paired_check$n_exit == 0),       "\n")
+#cat("Adults with exit only:          ", sum(paired_check$n_entry == 0 & paired_check$n_exit > 0),       "\n")
 
 # paired graduates count
 graduated_ids <- adult_combined %>%
@@ -311,7 +375,7 @@ pubasst_wide <- pubasst_clean %>%
   )
 
 # merge pubasst into adult_paired
-adult_paired_pub <- adult_paired %>%
+adult_paired <- adult_paired %>%
   left_join(pubasst_wide, by = "Adult_ID") %>%
   mutate(across(
     .cols    = starts_with("has_") & !all_of("has_pubasst"),
@@ -319,47 +383,16 @@ adult_paired_pub <- adult_paired %>%
   )) %>%
   mutate(has_pubasst = replace_na(has_pubasst, 0L))
 
-# new columns for children ages
-
-adult_paired <- adult_paired_pub %>%
-  # 1.  Parse the string into a numeric vector *for each row*
-  mutate(child_ages_vec = map(
-    str_split(Children_Ages, ","),
-    ~ suppressWarnings(as.numeric(trimws(.x))) %>% na.omit()
-  )) %>%
-  # 2.  Create the four bucket flags, each calculated row‑wise
-  rowwise() %>%
-  mutate(
-    child_0_5   = if_else(any(child_ages_vec <= 5),  1L, 0L),
-    child_6_10  = if_else(any(child_ages_vec >= 6 & child_ages_vec <= 10), 1L, 0L),
-    child_11_15 = if_else(any(child_ages_vec >= 11 & child_ages_vec <= 15), 1L, 0L),
-    child_16_19 = if_else(any(child_ages_vec >= 16 & child_ages_vec <= 19), 1L, 0L)
-  ) %>%
-  ungroup() %>%
-  # 3.  Clean up helper column
-  select(-child_ages_vec)
 
 # save single combined wide file
 write_csv(adult_paired, "data/Adult_Paired.csv")
-adult_paired <- adult_paired %>%
-  mutate(Subgroup_115 = as.logical(Subgroup_115))
 
-# clean values and remove children_ages column
-adult_paired_clean <- adult_paired %>%
-  # drop Children_Ages
-  select(-Children_Ages) %>%
-  # strip spaces, commas, punctuation from all character columns
-  mutate(across(where(is.character), ~ gsub("[[:space:][:punct:]]", "", .))) %>%
-  # convert Subgroup_115 from logical (TRUE/FALSE) to 0/1
-  mutate(Subgroup_115 = as.integer(Subgroup_115))
-
-write_csv(adult_paired_clean, "data/Adult_Paired_clean.csv")
 
 # confirm final file
-cat("\nFinal combined file rows:    ", nrow(adult_paired_clean),                    "\n")
-cat("Final combined file columns: ", ncol(adult_paired_clean),                    "\n")
-cat("Adults in Subgroup 115:      ", sum(adult_paired_clean$Subgroup_115 == 1),   "\n")
-cat("Adults NOT in Subgroup 115:  ", sum(adult_paired_clean$Subgroup_115 == 0),   "\n")
+cat("\nFinal combined file rows:    ", nrow(adult_paired),                    "\n")
+cat("Final combined file columns: ", ncol(adult_paired),                    "\n")
+cat("Adults in Subgroup 115:      ", sum(adult_paired$Subgroup_115 == 1),   "\n")
+cat("Adults NOT in Subgroup 115:  ", sum(adult_paired$Subgroup_115 == 0),   "\n")
 
 # print columns & classes
 col_classes <- sapply(adult_paired_clean, class)   # one‑element vector per column
